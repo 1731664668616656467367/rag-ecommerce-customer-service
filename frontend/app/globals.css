@@ -1,0 +1,121 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  @apply bg-canvas text-ink font-sans antialiased;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: rgba(0, 113, 227, 0.16);
+}
+
+/* 焦点可见性：键盘用户必须能看到焦点在哪 */
+:focus-visible {
+  outline: 2px solid #0071e3;
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+
+@layer components {
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-full px-4 py-2 text-sm font-medium
+           transition-colors duration-200 disabled:cursor-not-allowed disabled:opacity-40;
+  }
+
+  .btn-primary {
+    @apply btn bg-accent text-white hover:bg-[#0077ed];
+  }
+
+  .btn-ghost {
+    @apply btn border border-hairline bg-white text-ink hover:border-ink/30 hover:bg-mist;
+  }
+
+  .btn-quiet {
+    @apply btn text-muted hover:bg-mist hover:text-ink;
+  }
+
+  .surface {
+    @apply rounded-card border border-hairline bg-white;
+  }
+
+  .label {
+    @apply text-[13px] font-medium tracking-wide text-muted;
+  }
+
+  .field {
+    @apply w-full rounded-2xl border border-hairline bg-white px-4 py-3 text-[15px] text-ink
+           placeholder:text-muted/70 focus:border-accent focus:outline-none;
+  }
+}
+
+/* 细滚动条，避免抢视觉重心 */
+.scroll-thin {
+  scrollbar-width: thin;
+  scrollbar-color: #d2d2d7 transparent;
+}
+.scroll-thin::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.scroll-thin::-webkit-scrollbar-thumb {
+  background: #d2d2d7;
+  border-radius: 999px;
+}
+.scroll-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-rise {
+  animation: rise 240ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-rise {
+    animation: none;
+  }
+}
+
+/* 打字中的三个小点 */
+@keyframes blink {
+  0%,
+  80%,
+  100% {
+    opacity: 0.25;
+  }
+  40% {
+    opacity: 1;
+  }
+}
+
+.dot {
+  animation: blink 1.2s infinite ease-in-out;
+}
+.dot:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.dot:nth-child(3) {
+  animation-delay: 0.3s;
+}

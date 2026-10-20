@@ -1,0 +1,35 @@
+# 本地一键启动：docker compose up --build
+# 说明：未在本机验证过构建结果，如果失败请以 README 的本地启动方式为准。
+services:
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    environment:
+      APP_ENV: production
+      DATABASE_URL: sqlite:////app/data/app.db
+      KNOWLEDGE_DIR: /app/knowledge_base
+      UPLOAD_DIR: /app/data/uploads
+      INDEX_DIR: /app/data/index
+      CORS_ORIGINS: http://localhost:3000
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-auto}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+    volumes:
+      - backend-data:/app/data
+      - ./knowledge_base:/app/knowledge_base:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:8000/api}
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+
+volumes:
+  backend-data:
