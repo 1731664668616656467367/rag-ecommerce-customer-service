@@ -62,3 +62,6 @@ backend/data/
 backend/static/
 backend/knowledge_base/
 
+
+# 发布工具的内部标记文件（本地状态，不进仓库）
+.wbapp_*.genie
