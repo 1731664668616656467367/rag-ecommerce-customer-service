@@ -10,16 +10,18 @@ venv/
 
 # 环境变量与密钥（绝不提交）
 .env
-.env.local
+.env.*
+!.env.example
 backend/.env
 frontend/.env.local
 frontend/.env
 
-# 运行时数据：数据库、上传的原始文档、向量索引
+# 运行时数据：数据库、上传的原始文档、向量索引、重建暂存区
 backend/data/*.db
 backend/data/*.db-journal
 backend/data/uploads/*
 backend/data/index/*
+backend/data/index_staging_*/
 !backend/data/uploads/.gitkeep
 !backend/data/index/.gitkeep
 
@@ -32,6 +34,16 @@ build/
 npm-debug.log*
 yarn-error.log*
 pnpm-debug.log*
+# TypeScript 增量构建缓存（机器相关，不要进仓库）
+*.tsbuildinfo
+# 本地构建/调试输出
+*.log
+*.db
+*.sqlite
+*.sqlite3
+
+# 工具与助手的工作区数据（本地状态，不是源码）
+.workbuddy/
 
 # 系统与编辑器
 .DS_Store
@@ -39,3 +51,10 @@ Thumbs.db
 .idea/
 .vscode/
 *.swp
+
+# 运行时/测试临时产物
+.coverage
+htmlcov/
+.python-version
+backend/data/
+

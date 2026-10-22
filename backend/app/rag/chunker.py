@@ -38,8 +38,17 @@ def clean_text(raw: str) -> str:
 
 
 def split_sentences(text: str) -> list[str]:
-    parts = [p.strip() for p in _SENTENCE_END.split(text)]
-    return [p for p in parts if p]
+    """按句末标点切句，**保留句尾的换行**。
+
+    为什么不能直接 `p.strip()`：
+        段落之间是空行，空行会被切成只含 "\\n" 的片段。整段 strip 之后
+        这个片段变成空串被丢掉，于是 "## 发货时间\\n\\n现货商品…" 会拼成
+        "## 发货时间现货商品…"——标题和正文粘在一起，
+        最后用户在回答里看到的就是一句没有断行的长串。
+        这里只去掉空格与全角空格，换行留着当结构信息。
+    """
+    parts = _SENTENCE_END.split(text)
+    return [p.strip(" \t\u3000") for p in parts if p.strip()]
 
 
 def chunk_text(

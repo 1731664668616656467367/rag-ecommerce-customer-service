@@ -69,6 +69,8 @@ def add_message(
     intent: str | None = None,
     sources: list | None = None,
     degraded: str | None = None,
+    answer_mode: str | None = None,
+    reply_type: str | None = None,
 ) -> Message:
     msg = Message(
         session_id=session_id,
@@ -77,6 +79,8 @@ def add_message(
         intent=intent,
         sources=sources,
         degraded=degraded,
+        answer_mode=answer_mode,
+        reply_type=reply_type,
     )
     db.add(msg)
     # 更新会话活跃时间，让会话列表按最近使用排序

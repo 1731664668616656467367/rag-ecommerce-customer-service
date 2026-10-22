@@ -4,6 +4,12 @@
 
 :root {
   color-scheme: light;
+  /* 供原生控件（滚动条、焦点环）复用的变量，避免和 tailwind 配置两处维护 */
+  --ink: #222222;
+  --muted: #77746d;
+  --hairline: #e9e6de;
+  --accent: #222222;
+  --cream: #f6e6a6;
 }
 
 html,
@@ -12,66 +18,137 @@ body {
 }
 
 body {
-  @apply bg-canvas text-ink font-sans antialiased;
+  @apply bg-shell text-ink font-sans antialiased;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
 
 ::selection {
-  background: rgba(0, 113, 227, 0.16);
+  background: rgba(246, 230, 166, 0.85);
+  color: #222222;
 }
 
-/* 焦点可见性：键盘用户必须能看到焦点在哪 */
+/* 焦点可见性：键盘用户必须能看到焦点在哪。
+   用黑色细环 + 奶油黄外扩，在暖白底上比蓝色更协调。 */
 :focus-visible {
-  outline: 2px solid #0071e3;
+  outline: 2px solid #222222;
   outline-offset: 2px;
   border-radius: 8px;
 }
 
 @layer components {
+  /* 统一按钮高度 36px：同一行里混着 32/36/40 高的按钮，是最典型的"模板感"来源 */
   .btn {
-    @apply inline-flex items-center justify-center gap-2 rounded-full px-4 py-2 text-sm font-medium
-           transition-colors duration-200 disabled:cursor-not-allowed disabled:opacity-40;
+    @apply inline-flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-pill px-4
+           text-[13px] font-medium transition-all duration-150 ease-out-soft
+           disabled:cursor-not-allowed disabled:opacity-40;
   }
 
+  /* 主按钮 = 深色胶囊（参考图里 Dashboard 选中态） */
   .btn-primary {
-    @apply btn bg-accent text-white hover:bg-[#0077ed];
+    @apply btn bg-ink text-white shadow-lift hover:bg-black active:scale-[0.985] active:bg-black;
   }
 
+  /* 次按钮 = 白底细边 */
   .btn-ghost {
-    @apply btn border border-hairline bg-white text-ink hover:border-ink/30 hover:bg-mist;
+    @apply btn border border-hairline bg-surface text-ink
+           hover:border-hairline-strong hover:bg-mist active:scale-[0.985];
   }
 
+  /* 幽灵按钮 = 无边框，悬停浅填充 */
   .btn-quiet {
-    @apply btn text-muted hover:bg-mist hover:text-ink;
+    @apply btn text-muted hover:bg-mist hover:text-ink active:scale-[0.985];
   }
 
+  /* 奶油黄按钮：用于"强调但不危险"的动作 */
+  .btn-cream {
+    @apply btn border border-[#E7D79B] bg-cream text-ink hover:bg-[#F2DE93] active:scale-[0.985];
+  }
+
+  .btn-danger {
+    @apply btn border border-[#EBC9C3] bg-surface text-danger hover:bg-danger-soft;
+  }
+
+  .btn-sm {
+    @apply h-8 rounded-pill px-3 text-[12.5px];
+  }
+
+  .btn-icon {
+    @apply h-8 w-8 rounded-full p-0;
+  }
+
+  /* 卡片：白底、22px 圆角、极细边框，hover 只做很轻的抬升 */
   .surface {
-    @apply rounded-card border border-hairline bg-white;
+    @apply rounded-card border border-hairline bg-surface shadow-card;
+  }
+
+  /* 可点击卡片：hover 抬升 + 边框变深，不做发光 */
+  .surface-hover {
+    @apply surface transition-all duration-200 ease-out-soft
+           hover:-translate-y-0.5 hover:border-hairline-strong hover:shadow-lift;
+  }
+
+  /* 奶油黄强调卡片 */
+  .surface-cream {
+    @apply rounded-card border border-[#EADFAF] bg-cream-soft shadow-card;
+  }
+
+  /* 深色卡片 */
+  .surface-dark {
+    @apply rounded-card border border-[#333331] bg-dark text-white shadow-dark;
   }
 
   .label {
-    @apply text-[13px] font-medium tracking-wide text-muted;
+    @apply text-[11px] font-medium uppercase tracking-[0.09em] text-muted;
   }
 
   .field {
-    @apply w-full rounded-2xl border border-hairline bg-white px-4 py-3 text-[15px] text-ink
-           placeholder:text-muted/70 focus:border-accent focus:outline-none;
+    @apply w-full rounded-control border border-hairline bg-surface px-3.5 py-2.5 text-[14px] text-ink
+           placeholder:text-muted/70 focus:border-ink/30 focus:outline-none
+           focus:ring-2 focus:ring-cream;
+  }
+
+  .section-title {
+    @apply text-[15px] font-semibold tracking-tight text-ink;
+  }
+
+  .hint {
+    @apply text-[12.5px] leading-relaxed text-muted;
+  }
+
+  /* 小圆角标签（状态、计数） */
+  .chip {
+    @apply inline-flex items-center gap-1 rounded-pill border border-hairline bg-surface
+           px-2.5 py-1 text-[11.5px] font-medium leading-none text-muted;
+  }
+
+  /* 参考图深色卡片里的点阵装饰：纯 CSS，不是图片，也不做成"发光" */
+  .dotgrid {
+    background-image: radial-gradient(circle, rgba(246, 230, 166, 0.55) 1.2px, transparent 1.4px);
+    background-size: 14px 14px;
+  }
+
+  .dotgrid-dim {
+    background-image: radial-gradient(circle, rgba(255, 255, 255, 0.16) 1.2px, transparent 1.4px);
+    background-size: 14px 14px;
   }
 }
 
 /* 细滚动条，避免抢视觉重心 */
 .scroll-thin {
   scrollbar-width: thin;
-  scrollbar-color: #d2d2d7 transparent;
+  scrollbar-color: #cfcbc0 transparent;
 }
 .scroll-thin::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 .scroll-thin::-webkit-scrollbar-thumb {
-  background: #d2d2d7;
+  background: #d8d4c9;
   border-radius: 999px;
+}
+.scroll-thin::-webkit-scrollbar-thumb:hover {
+  background: #c2bdaf;
 }
 .scroll-thin::-webkit-scrollbar-track {
   background: transparent;
@@ -92,9 +169,76 @@ body {
   animation: rise 240ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
 }
 
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.animate-fade {
+  animation: fade-in 160ms ease-out both;
+}
+
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.animate-pop {
+  animation: pop-in 140ms cubic-bezier(0.2, 0.8, 0.3, 1) both;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.spinner {
+  animation: spin 800ms linear infinite;
+}
+
+/* 骨架屏：比"加载中…"文字更能表达"正在取数据" */
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.skeleton {
+  position: relative;
+  overflow: hidden;
+  background: #f0eee7;
+}
+.skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.65), transparent);
+  animation: shimmer 1.4s infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .animate-rise {
-    animation: none;
+  .animate-rise,
+  .animate-fade,
+  .animate-pop,
+  .spinner,
+  .dot,
+  .skeleton::after {
+    animation: none !important;
+  }
+  .surface-hover:hover {
+    transform: none;
   }
 }
 
@@ -118,4 +262,78 @@ body {
 }
 .dot:nth-child(3) {
   animation-delay: 0.3s;
+}
+
+/* 消息正文里的 Markdown 排版。
+   只针对 .prose-chat 内部生效，不影响页面其它地方。 */
+.prose-chat {
+  @apply text-[14.5px] leading-[1.78] text-ink;
+}
+.prose-chat > * + * {
+  margin-top: 0.6em;
+}
+.prose-chat h1,
+.prose-chat h2,
+.prose-chat h3 {
+  @apply font-semibold text-ink;
+  line-height: 1.4;
+}
+.prose-chat h1 {
+  @apply text-[17px];
+}
+.prose-chat h2 {
+  @apply text-[15.5px];
+}
+.prose-chat h3 {
+  @apply text-[14.5px];
+}
+.prose-chat ul,
+.prose-chat ol {
+  @apply space-y-1 pl-5;
+}
+.prose-chat ul {
+  list-style: disc;
+}
+.prose-chat ol {
+  list-style: decimal;
+}
+.prose-chat li::marker {
+  color: #a8a49a;
+}
+.prose-chat a {
+  @apply text-ink underline decoration-ink/25 underline-offset-2 hover:decoration-ink;
+}
+.prose-chat code {
+  @apply rounded-[5px] bg-mist px-1.5 py-0.5 font-mono text-[12.5px] text-ink;
+}
+.prose-chat pre {
+  @apply overflow-x-auto rounded-[12px] border border-hairline bg-[#FBF9F3] p-3;
+}
+.prose-chat pre code {
+  @apply bg-transparent p-0 text-[12.5px];
+}
+.prose-chat blockquote {
+  @apply rounded-r-[10px] border-l-2 border-[#E7D79B] bg-mist/60 py-2 pl-3 pr-2 text-ink/85;
+}
+/* 引用块里的每一行都单独成行：知识库原文是按小节断行的，
+   把行合并成一段会让"发货时间 / 配送时效"这类小标题淹在正文里。 */
+.prose-chat blockquote .quote-line {
+  display: block;
+}
+.prose-chat blockquote .quote-item {
+  display: block;
+  position: relative;
+  padding-left: 0.95em;
+}
+.prose-chat blockquote .quote-item::before {
+  content: "•";
+  position: absolute;
+  left: 0.2em;
+  color: #b6b1a4;
+}
+.prose-chat hr {
+  @apply my-3 border-hairline;
+}
+.prose-chat strong {
+  @apply font-semibold;
 }

@@ -89,8 +89,10 @@ def test_delete_one_document_keeps_others(db, sample_text):
     assert d2.id in remaining
     assert index.size == total_before - d1.chunk_count
 
-    # 删完后仍能检索到另一份文档
-    result = Retriever(top_k=3, min_score=0.05).retrieve("同城多久能到")
+    # 删完后仍能检索到另一份文档。
+    # 这里用“同城次日达”（政策B 原文里的字面表述）而不是更口语的问法：
+    # 本用例验证的是“删除只影响被删的那篇”，不是相关性门槛，别让门槛干扰结论。
+    result = Retriever(top_k=3, min_score=0.05).retrieve("同城次日达")
     assert any(h.document_id == d2.id for h in result.hits)
 
 

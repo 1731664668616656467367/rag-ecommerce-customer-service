@@ -59,14 +59,14 @@ def test_extract_intent_token_garbage_falls_back():
     assert extract_intent_token("我不知道该怎么分类") == "其他"
 
 
-async def test_llm_based_classification():
+async def test_llm_based_classification(llm_mode):
     llm = FakeLLM(intent_reply='{"intent":"售后"}')
     result = await classify_intent("东西有点问题", llm)
     assert result["intent"] == "售后"
     assert result["method"] == "llm"
 
 
-async def test_llm_invalid_output_is_rejected():
+async def test_llm_invalid_output_is_rejected(llm_mode):
     llm = FakeLLM(intent_reply='{"intent":"投诉建议"}')
     result = await classify_intent("东西有点问题", llm)
     assert result["intent"] == "其他"
@@ -82,7 +82,7 @@ async def test_rule_shortcut_skips_llm():
     assert llm.calls == []
 
 
-async def test_llm_error_falls_back_to_rules():
+async def test_llm_error_falls_back_to_rules(llm_mode):
     from tests.support import UnavailableLLM
 
     result = await classify_intent("东西有点问题", UnavailableLLM())

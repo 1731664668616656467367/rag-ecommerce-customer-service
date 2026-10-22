@@ -15,10 +15,19 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from app.api.routes import chat, feedback, health, knowledge, sessions
+from app.api.routes import (
+    chat,
+    feedback,
+    health,
+    knowledge,
+    sessions,
+    settings as settings_routes,
+    stats,
+)
 from app.config import settings
 from app.db.session import get_session_factory, init_db
 from app.services.knowledge_service import seed_from_directory
+from app.services.settings_service import load_answer_mode
 
 logging.basicConfig(
     level=getattr(logging, settings.log_level.upper(), logging.INFO),
@@ -33,11 +42,14 @@ async def lifespan(_app: FastAPI):
     logger.info("数据库已就绪：%s", settings.database_url)
     db = get_session_factory()()
     try:
+        # 先把用户上次在页面上选的回答模式读回内存，
+        # 否则重启后模式会悄悄回到 .env 的值，用户会以为设置没保存。
+        load_answer_mode(db)
         result = seed_from_directory(db)
         if result.get("imported"):
             logger.info("已导入样例知识库：%s", result["imported"])
     except Exception as exc:  # noqa: BLE001
-        logger.warning("样例知识库导入失败（不影响启动）：%s", exc)
+        logger.warning("启动初始化失败（不影响启动）：%s", exc)
     finally:
         db.close()
     yield
@@ -60,7 +72,9 @@ app.add_middleware(
 
 API_PREFIX = "/api"
 app.include_router(health.router, prefix=API_PREFIX)
+app.include_router(stats.router, prefix=API_PREFIX)
 app.include_router(chat.router, prefix=API_PREFIX)
+app.include_router(settings_routes.router, prefix=API_PREFIX)
 app.include_router(sessions.router, prefix=API_PREFIX)
 app.include_router(knowledge.router, prefix=API_PREFIX)
 app.include_router(feedback.router, prefix=API_PREFIX)

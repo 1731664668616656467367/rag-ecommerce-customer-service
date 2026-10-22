@@ -11,16 +11,22 @@ def test_health_returns_structured_status(client):
     assert data["status"] in ("ok", "degraded")
     assert data["database"] == "ok"
     assert data["embedding"]["provider"] == "local-hashing"
+    assert data["answer_mode"] == "knowledge_only"
+    # 纯知识库模式：没配密钥是正常状态，不应该被当成故障
     assert data["llm"]["configured"] is False
+    assert data["llm"]["will_be_called"] is False
+    assert not any("DEEPSEEK_API_KEY" in w for w in data["warnings"])
     assert isinstance(data["warnings"], list)
-    # 未配置密钥时必须明确告警，不能假装一切正常
-    assert any("DEEPSEEK_API_KEY" in w for w in data["warnings"])
 
 
 def test_health_reports_index_stats(client):
     data = client.get("/api/health").json()
     assert data["index"]["chunks"] == 0
     assert data["index"]["backend"] in ("numpy", "faiss")
+    # 检索方式也必须如实暴露
+    assert data["retrieval"]["mode"] == "hybrid"
+    assert "vector" in data["retrieval"]["channels"]
+    assert "bm25" in data["retrieval"]["channels"]
 
 
 def test_root_route(client):

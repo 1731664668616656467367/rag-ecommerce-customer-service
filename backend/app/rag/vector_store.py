@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import threading
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -59,6 +60,10 @@ class VectorIndex:
         self._records: list[ChunkRecord] = []
         self._vectors: np.ndarray = np.zeros((0, 0), dtype=np.float32)
         self._faiss_index = None
+        # 每次写入/删除都 +1，供上层缓存 BM25 语料用（避免每问一句就重新分词全库）
+        self._version = 0
+        # 记录索引是用哪个 embedding 模型建出来的，换模型后可检测出来要求重建
+        self._signature = ""
         self._load()
 
     # ---------------- 持久化 ----------------
@@ -67,6 +72,7 @@ class VectorIndex:
             if self.meta_path.exists() and self.vectors_path.exists():
                 try:
                     raw = json.loads(self.meta_path.read_text(encoding="utf-8"))
+                    self._signature = raw.get("signature", "") or ""
                     self._records = [ChunkRecord(**r) for r in raw.get("records", [])]
                     self._vectors = np.load(self.vectors_path).astype(np.float32)
                     if self._vectors.shape[0] != len(self._records):
@@ -78,12 +84,52 @@ class VectorIndex:
             self._rebuild_faiss()
 
     def _persist(self) -> None:
-        np.save(self.vectors_path, self._vectors)
+        """先写临时文件、再原子替换。
+
+        直接覆盖写的话，写到一半进程被杀/磁盘满，留下的是半截 vectors.npy 配完整 meta.json，
+        下次启动 _load 会判定“索引损坏”并把整个索引重置为空 —— 一次写失败把知识库清空。
+        改成临时文件 + os.replace 后，失败最多丢掉这一次写入，旧文件仍然完整。
+        """
+        vectors_tmp = self.vectors_path.with_name("vectors.npy.tmp")
+        meta_tmp = self.meta_path.with_name("meta.json.tmp")
+        with open(vectors_tmp, "wb") as fh:  # 用文件句柄，避免 np.save 自动追加 .npy
+            np.save(fh, self._vectors)
         payload = {
             "dim": int(self._vectors.shape[1]) if self._vectors.size else 0,
+            "signature": self._signature,
             "records": [asdict(r) for r in self._records],
         }
-        self.meta_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        meta_tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        os.replace(vectors_tmp, self.vectors_path)
+        os.replace(meta_tmp, self.meta_path)
+
+    def replace_all(
+        self,
+        records: list[ChunkRecord],
+        vectors: np.ndarray,
+        signature: str,
+    ) -> None:
+        """用一份**已经建好**的索引整体替换当前索引。
+
+        这是“重建索引”的落点：暂存区全部成功后，一次替换到位。
+        替换前先校验数量和维度，避免把半成品写进线上索引。
+        """
+        mat = np.asarray(vectors, dtype=np.float32)
+        if mat.size == 0:
+            mat = np.zeros((0, 0), dtype=np.float32)
+        if mat.ndim != 2:
+            raise ValueError("向量矩阵必须是二维")
+        if mat.shape[0] != len(records):
+            raise ValueError(
+                f"向量行数（{mat.shape[0]}）与元数据条数（{len(records)}）不一致，拒绝替换"
+            )
+        with self._lock:
+            self._records = list(records)
+            self._vectors = mat
+            self._signature = signature
+            self._version += 1
+            self._persist()
+            self._rebuild_faiss()
 
     def _rebuild_faiss(self) -> None:
         self._faiss_index = None
@@ -107,6 +153,7 @@ class VectorIndex:
         texts: list[str],
         vectors: np.ndarray,
         index_version: str = "v1",
+        signature: str = "",
     ) -> int:
         """整篇替换某文档的片段：先删旧片段，再写入新片段。
 
@@ -116,6 +163,25 @@ class VectorIndex:
         if vectors.shape[0] != len(texts):
             raise ValueError("文本数量与向量数量不匹配")
         with self._lock:
+            # 混用不同 embedding 模型的向量没有意义，直接拒绝并提示重建
+            if (
+                self._records
+                and signature
+                and self._signature
+                and signature != self._signature
+            ):
+                raise ValueError(
+                    f"索引由 {self._signature} 建立，当前为 {signature}。"
+                    "请调用 /api/knowledge/reindex 重建索引后再使用。"
+                )
+            # 维度检查必须在改动任何状态之前：否则抛异常时内存里已经把这篇文章的
+            # 片段删掉了，而磁盘上还在 —— 内存与磁盘不一致，之后的表现会非常难查。
+            if self._vectors.size and texts:
+                if vectors.shape[1] != self._vectors.shape[1]:
+                    raise ValueError(
+                        f"向量维度不一致：索引 {self._vectors.shape[1]}，新数据 {vectors.shape[1]}。"
+                        "请调用 /api/knowledge/reindex 重建索引。"
+                    )
             self._drop_locked(document_id)
             if not texts:
                 self._persist()
@@ -128,13 +194,11 @@ class VectorIndex:
             if self._vectors.size == 0:
                 self._vectors = vectors.astype(np.float32)
             else:
-                if vectors.shape[1] != self._vectors.shape[1]:
-                    raise ValueError(
-                        f"向量维度不一致：索引 {self._vectors.shape[1]}，新数据 {vectors.shape[1]}。"
-                        "请清空 data/index 后重建知识库。"
-                    )
                 self._vectors = np.vstack([self._vectors, vectors.astype(np.float32)])
             self._records.extend(new_records)
+            if signature:
+                self._signature = signature
+            self._version += 1
             self._persist()
             self._rebuild_faiss()
             return len(new_records)
@@ -151,6 +215,7 @@ class VectorIndex:
         with self._lock:
             removed = self._drop_locked(document_id)
             if removed:
+                self._version += 1
                 self._persist()
                 self._rebuild_faiss()
             return removed
@@ -159,6 +224,8 @@ class VectorIndex:
         with self._lock:
             self._records = []
             self._vectors = np.zeros((0, 0), dtype=np.float32)
+            self._signature = ""
+            self._version += 1
             self._persist()
             self._rebuild_faiss()
 
@@ -199,6 +266,24 @@ class VectorIndex:
     def size(self) -> int:
         return len(self._records)
 
+    @property
+    def version(self) -> int:
+        return self._version
+
+    @property
+    def signature(self) -> str:
+        return self._signature
+
+    def documents(self) -> list[ChunkRecord]:
+        """返回片段快照（副本），供 BM25 等词法检索使用。"""
+        with self._lock:
+            return list(self._records)
+
+    def snapshot(self) -> tuple[list[ChunkRecord], np.ndarray]:
+        """一次性取走 (片段, 向量副本)，用于把暂存区索引整体搬到线上。"""
+        with self._lock:
+            return list(self._records), self._vectors.copy()
+
     def stats(self) -> dict:
         docs = {r.document_id for r in self._records}
         return {
@@ -206,6 +291,8 @@ class VectorIndex:
             "documents": len(docs),
             "dim": int(self._vectors.shape[1]) if self._vectors.size else 0,
             "backend": "faiss" if self._faiss_index is not None else "numpy",
+            "signature": self._signature,
+            "version": self._version,
         }
 
 

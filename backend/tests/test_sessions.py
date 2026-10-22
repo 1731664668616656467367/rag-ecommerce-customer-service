@@ -26,11 +26,11 @@ def test_create_session_without_body(client):
     assert resp.json()["title"] == "新会话"
 
 
-def test_messages_persist_and_are_ordered(client, indexed_doc, monkeypatch):
-    monkeypatch.setattr(chat_service, "_llm_or_none", lambda: FakeLLM(reply="回答一"))
+def test_messages_persist_and_are_ordered(client, indexed_doc, monkeypatch, llm_mode):
+    monkeypatch.setattr(chat_service, "get_llm_client", lambda: FakeLLM(reply="回答一"))
     first = client.post("/api/chat", json={"message": "第一个问题：退款多久到账"}).json()
 
-    monkeypatch.setattr(chat_service, "_llm_or_none", lambda: FakeLLM(reply="回答二"))
+    monkeypatch.setattr(chat_service, "get_llm_client", lambda: FakeLLM(reply="回答二"))
     client.post(
         "/api/chat",
         json={"message": "第二个问题：物流多久到", "session_id": first["session_id"]},
@@ -102,10 +102,10 @@ def test_history_window_limits_context(db):
     assert hist[-1]["content"] == "第11条"
 
 
-def test_feedback_flow(db, client, indexed_doc, monkeypatch):
+def test_feedback_flow(db, client, indexed_doc, monkeypatch, llm_mode):
     import app.services.chat_service as cs
 
-    monkeypatch.setattr(cs, "_llm_or_none", lambda: FakeLLM(reply="退款需1-3个工作日。"))
+    monkeypatch.setattr(cs, "get_llm_client", lambda: FakeLLM(reply="退款需1-3个工作日。"))
     data = client.post("/api/chat", json={"message": "退款多久到账"}).json()
 
     resp = client.post(

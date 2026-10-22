@@ -9,12 +9,16 @@
  */
 
 import type {
+  AnswerMode,
+  AnswerModeState,
   ChatResponse,
   DocumentItem,
   HealthResponse,
   KnowledgeList,
   SessionItem,
   ChatMessage,
+  WelcomeResponse,
+  StatsResponse,
 } from "./types";
 
 const RAW_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000/api";
@@ -76,6 +80,26 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export const api = {
   health: () => request<HealthResponse>("/health"),
 
+  /** 工作台概览：会话/消息/文档/索引/回答类型分布，全部为真实聚合。 */
+  stats: () => request<StatsResponse>("/stats"),
+
+  /** 首屏欢迎语。这是个纯读取接口：不创建会话、不写数据库，刷新多少次都安全。 */
+  welcome: () => request<WelcomeResponse>("/chat/welcome"),
+
+  /** 当前回答模式 + 模型服务状态（不含任何密钥）。 */
+  getAnswerMode: () => request<AnswerModeState>("/settings/answer-mode"),
+
+  /** 切换回答模式。由后端校验并持久化，前端只认后端返回的结果。 */
+  setAnswerMode: (mode: AnswerMode) =>
+    request<AnswerModeState>("/settings/answer-mode", {
+      method: "PUT",
+      body: JSON.stringify({ mode }),
+    }),
+
+  /** 清除页面上的覆盖值，回到 .env 的默认模式。 */
+  resetAnswerMode: () =>
+    request<AnswerModeState>("/settings/answer-mode/reset", { method: "POST" }),
+
   listSessions: () => request<SessionItem[]>("/sessions"),
   createSession: (title?: string) =>
     request<SessionItem>("/sessions", {
@@ -102,6 +126,11 @@ export const api = {
   },
   deleteKnowledge: (id: string) =>
     request<void>(`/knowledge/${id}`, { method: "DELETE" }),
+  /** 全量重建索引。换 embedding 模型后必须调它，否则向量维度/语义对不上。 */
+  reindexKnowledge: () =>
+    request<{ indexed: number; failed: number; chunks: number }>("/knowledge/reindex", {
+      method: "POST",
+    }),
 
   feedback: (messageId: string, rating: "helpful" | "unhelpful") =>
     request<{ id: string }>("/feedback", {

@@ -64,6 +64,11 @@ class Message(Base):
     sources: Mapped[list | None] = mapped_column(JSON, nullable=True)
     # 生成过程中的降级/错误标记，例如 llm_unavailable
     degraded: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # 这条回答由谁产生：knowledge_only（原文摘录）或 llm（模型生成）
+    answer_mode: Mapped[str | None] = mapped_column(String(24), nullable=True)
+    # 回复类别：greeting / identity / thanks / farewell / human_service / knowledge /
+    # no_answer / fallback / unclear。刷新页面后仍能还原“这条是引导语还是知识库回答”。
+    reply_type: Mapped[str | None] = mapped_column(String(24), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=utcnow, server_default=func.now(), index=True
     )
@@ -89,6 +94,27 @@ class KnowledgeDocument(Base):
     index_version: Mapped[str] = mapped_column(String(16), default="v1")
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=utcnow, onupdate=utcnow, server_default=func.now()
+    )
+
+
+class AppSetting(Base):
+    """运行期配置表（键值对）。
+
+    为什么需要它：
+        ANSWER_MODE 原本只来自 .env，改一次就得改文件 + 重启进程。
+        用户在页面上切换模式必须**真的生效**并且**重启后还在**，
+        所以把运行期覆盖值落库。.env 仍然是默认值（default_mode），
+        这里存的只是“用户显式改过的覆盖值”。
+
+    作用域：全局（所有会话共用），不做按会话独立模式。
+    """
+
+    __tablename__ = "app_settings"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[str] = mapped_column(String(255))
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=utcnow, onupdate=utcnow, server_default=func.now()
     )

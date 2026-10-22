@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import logging
+import shutil
 import uuid
 from pathlib import Path
 
@@ -21,7 +22,7 @@ from app.db.models import KnowledgeDocument
 from app.rag.chunker import chunk_text, clean_text
 from app.rag.embeddings import get_embedder
 from app.rag.loaders import SUPPORTED, DocumentError, load_document
-from app.rag.vector_store import get_index
+from app.rag.vector_store import VectorIndex, get_index
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +82,7 @@ def _index_texts(doc: KnowledgeDocument, text: str) -> int:
         texts=chunks,
         vectors=vectors,
         index_version=doc.index_version,
+        signature=embedder.signature(),
     )
 
 
@@ -180,31 +182,99 @@ def delete_document(db: OrmSession, document_id: str, missing_ok: bool = False) 
 
 
 def reindex_all(db: OrmSession) -> dict:
-    """全量重建：用于更换 embedding 模型后重算向量。"""
-    index = get_index()
-    index.clear()
+    """全量重建：先在**暂存区**建好，全部成功才替换线上索引。
+
+    为什么不能沿用“先 clear() 再逐篇重建”：
+        clear() 会立刻把空索引写盘。之后只要有一篇失败（Ollama 掉线、
+        换了模型维度对不上、磁盘满），旧向量已经没了，
+        知识库当场变成“不可检索”——一次失败的维护动作把线上服务打挂。
+        所以这里改成：
+          1. 在 data/index_staging_xxx 里建一份新索引（不碰线上文件）；
+          2. 有任何一篇成功 → 用这份新索引整体替换线上索引；
+          3. 全部失败 → 删掉暂存目录并报错，线上索引一个字节都不动。
+    """
+    docs = list_documents(db)
+    if not docs:
+        raise KnowledgeError("知识库里还没有文档，无需重建", 409)
+
+    embedder = get_embedder()
+    signature = embedder.signature()
+    staging_dir = Path(settings.index_dir).parent / f"index_staging_{uuid.uuid4().hex[:8]}"
+    staging = VectorIndex(staging_dir)  # 空目录：不会读到线上数据
+
     ok, failed = 0, 0
-    for doc in list_documents(db):
-        path = Path(settings.upload_dir) / doc.stored_name
-        if not path.exists():
-            doc.status = "failed"
-            doc.error = "原始文件缺失"
-            db.commit()
-            failed += 1
-            continue
-        try:
-            text = clean_text(load_document(path))
-            doc.chunk_count = _index_texts(doc, text)
-            doc.status = "indexed"
-            doc.error = None
-            db.commit()
+    errors: list[dict] = []
+    succeeded: list[tuple[str, int]] = []
+    try:
+        for doc in docs:
+            doc_id, doc_name, index_version = doc.id, doc.file_name, doc.index_version
+            path = Path(settings.upload_dir) / doc.stored_name
+            try:
+                if not path.exists():
+                    raise KnowledgeError("原始文件缺失，无法重建该文档", 422)
+                text = clean_text(load_document(path))
+                chunks = chunk_text(text)
+                if not chunks:
+                    raise KnowledgeError("文档没有可索引的有效内容", 422)
+                vectors = embedder.embed(chunks)
+                staging.upsert_document(
+                    document_id=doc_id,
+                    file_name=doc_name,
+                    texts=chunks,
+                    vectors=vectors,
+                    index_version=index_version,
+                    signature=signature,
+                )
+            except Exception as exc:  # noqa: BLE001
+                db.rollback()  # 不让上一篇的半截事务带进下一篇
+                failed += 1
+                errors.append({"file_name": doc_name, "error": str(exc)[:200]})
+                continue
+            succeeded.append((doc_id, len(chunks)))
             ok += 1
-        except Exception as exc:  # noqa: BLE001
-            doc.status = "failed"
-            doc.error = str(exc)[:200]
-            db.commit()
-            failed += 1
-    return {"indexed": ok, "failed": failed, "chunks": index.size}
+
+        # 一篇都没成就直接失败返回：此时**数据库和索引都不动**。
+        # 如果这里顺手把文档标成 failed，页面会显示“5 份全部处理失败”，
+        # 而实际检索仍然可用 —— 状态与事实不符，比不更新更糟。
+        if ok == 0:
+            first = errors[0]["error"] if errors else "未知原因"
+            raise KnowledgeError(
+                f"重建失败：{failed} 份文档全部失败，线上旧索引与文档状态均已保留。首个错误：{first}",
+                503,
+            )
+
+        records, vectors = staging.snapshot()
+        live = get_index()
+        # 唯一会改动线上索引的一步：数量与维度都在 replace_all 里校验过
+        live.replace_all(records, vectors, signature)
+
+        # 索引替换成功之后才落库状态，避免“索引没换成、文档却标了 failed/indexed”
+        for doc_id, chunk_count in succeeded:
+            row = db.get(KnowledgeDocument, doc_id)
+            if row is not None:
+                row.chunk_count = chunk_count
+                row.status = "indexed"
+                row.error = None
+        for item in errors:
+            row = db.scalar(
+                select(KnowledgeDocument).where(KnowledgeDocument.file_name == item["file_name"])
+            )
+            if row is not None:
+                row.status = "failed"
+                row.error = item["error"]
+        db.commit()
+    finally:
+        shutil.rmtree(staging_dir, ignore_errors=True)
+
+    return {
+        "indexed": ok,
+        "failed": failed,
+        "chunks": live.size,
+        "dim": int(vectors.shape[1]) if vectors.size else 0,
+        "provider": embedder.name,
+        "signature": signature,
+        "errors": errors[:5],
+    }
 
 
 def seed_from_directory(db: OrmSession, directory: str | None = None) -> dict:

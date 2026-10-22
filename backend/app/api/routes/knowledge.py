@@ -10,9 +10,10 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile
 from sqlalchemy.orm import Session as OrmSession
 
+from app.config import settings
 from app.db.session import get_db
 from app.rag.vector_store import get_index
-from app.schemas.models import DocumentOut, KnowledgeListResponse
+from app.schemas.models import DocumentOut, KnowledgeListResponse, UploadPolicy
 from app.services import knowledge_service
 
 router = APIRouter(tags=["knowledge"])
@@ -21,9 +22,15 @@ router = APIRouter(tags=["knowledge"])
 @router.get("/knowledge", response_model=KnowledgeListResponse)
 def list_knowledge(db: OrmSession = Depends(get_db)):
     docs = knowledge_service.list_documents(db)
+    extensions = sorted(settings.allowed_extension_set)
     return KnowledgeListResponse(
         documents=[DocumentOut.model_validate(d) for d in docs],
         index=get_index().stats(),
+        upload=UploadPolicy(
+            max_mb=settings.max_upload_mb,
+            extensions=extensions,
+            accepts=",".join(extensions),
+        ),
     )
 
 
@@ -54,4 +61,13 @@ def delete_knowledge(document_id: str, db: OrmSession = Depends(get_db)) -> Resp
 
 @router.post("/knowledge/reindex")
 def reindex(db: OrmSession = Depends(get_db)) -> dict:
-    return knowledge_service.reindex_all(db)
+    """全量重建索引。
+
+    失败时必须返回明确原因（而不是 500 一把梭）：
+    重建可能因为 Ollama 掉线、模型维度不匹配、原始文件缺失而失败，
+    这些都不是“服务器内部错误”，用户需要据此决定下一步动作。
+    """
+    try:
+        return knowledge_service.reindex_all(db)
+    except knowledge_service.KnowledgeError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc

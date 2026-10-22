@@ -16,6 +16,7 @@ import json
 import logging
 import re
 
+from app.config import settings
 from app.llm.base import LLMClient, LLMError
 
 logger = logging.getLogger(__name__)
@@ -23,23 +24,76 @@ logger = logging.getLogger(__name__)
 INTENTS: tuple[str, ...] = ("查订单", "退款", "物流", "售后", "其他")
 DEFAULT_INTENT = "其他"
 
-# 关键词表：命中越多分越高。故意包含常见口语说法。
-RULES: dict[str, tuple[str, ...]] = {
+# 关键词表：每个词带权重。为什么不用“命中个数”？
+#   “签收”在物流里出现，“质量问题”在售后里出现，两者都命中 1 次就会打成平手，
+#   而“质量问题”明显更能代表意图。所以强特征给高权重，弱特征给低权重。
+#   实测：'商品有质量问题，签收后多久内可以退货？' 曾被错分到物流，加权重后归为售后。
+RULES: dict[str, tuple[tuple[str, float], ...]] = {
     "退款": (
-        "退款", "退钱", "退货退款", "申请退", "钱退", "退回来", "退我", "原路退回",
-        "退单", "取消订单退", "退费",
+        ("退货退款", 3.0),
+        ("退款", 2.0),
+        ("退钱", 2.0),
+        ("申请退", 2.0),
+        ("钱退", 2.0),
+        ("退回来", 2.0),
+        ("退我", 2.0),
+        ("原路退回", 2.0),
+        ("退单", 2.0),
+        ("退费", 2.0),
+        ("退款进度", 2.5),
     ),
     "物流": (
-        "物流", "快递", "运单", "单号", "发货", "到货", "配送", "派送", "签收",
-        "顺丰", "几天能到", "什么时候到", "还没收到", "运输",
+        ("物流", 2.0),
+        ("快递", 2.0),
+        ("运单", 2.0),
+        ("单号", 2.0),
+        ("发货", 2.0),
+        ("配送", 2.0),
+        ("派送", 2.0),
+        ("几天能到", 2.0),
+        ("什么时候到", 2.0),
+        ("还没收到", 1.5),
+        ("运输", 1.5),
+        ("到哪", 1.5),
+        ("到货", 1.5),
+        ("顺丰", 1.5),
+        ("签收", 1.0),
     ),
     "售后": (
-        "售后", "换货", "维修", "坏了", "破损", "质量问题", "少件", "漏发", "错发",
-        "保修", "三包", "退换", "不想要了", "七天无理由",
+        ("售后服务", 3.0),
+        # “售后”这个词本身以前漏了：用户问“如何申请售后服务”，
+        # 规则一个词都不中，被归成“其他”，再叠加知识库没命中就变成了
+        # “我不提供这个服务”——明明在服务范围内，却把用户推走。
+        ("售后", 2.5),
+        ("质量问题", 3.0),
+        ("换货", 2.5),
+        ("维修", 2.5),
+        ("保修", 2.5),
+        ("三包", 2.5),
+        ("退货", 2.5),
+        ("坏了", 2.0),
+        ("破损", 2.0),
+        ("少件", 2.0),
+        ("漏发", 2.0),
+        ("错发", 2.0),
+        ("退换", 2.0),
+        ("有瑕疵", 2.0),
+        ("七天无理由", 2.5),
+        ("不想要了", 1.5),
     ),
     "查订单": (
-        "订单", "我的单", "下单", "买的", "购买记录", "订单号", "查单", "待发货",
-        "待收货", "订单状态",
+        ("收货地址", 2.5),
+        ("订单状态", 2.5),
+        ("订单号", 2.5),
+        ("订单", 2.0),
+        ("我的单", 2.0),
+        ("购买记录", 2.0),
+        ("查单", 2.0),
+        ("待发货", 2.0),
+        ("待收货", 2.0),
+        ("下单", 1.5),
+        ("买的", 1.5),
+        ("地址", 1.5),
     ),
 }
 
@@ -47,12 +101,12 @@ _VALID = set(INTENTS)
 _CODE_FENCE = re.compile(r"```(?:json)?\s*(.*?)```", re.S)
 
 
-def rule_classify(question: str) -> tuple[str, int]:
-    """返回 (意图, 命中数)。命中数为 0 时表示规则无法判断。"""
+def rule_classify(question: str) -> tuple[str, float]:
+    """返回 (意图, 得分)。得分为 0 时表示规则无法判断。"""
     q = question.lower()
-    best, best_score = DEFAULT_INTENT, 0
+    best, best_score = DEFAULT_INTENT, 0.0
     for intent, words in RULES.items():
-        score = sum(1 for w in words if w in q)
+        score = sum(weight for kw, weight in words if kw in q)
         if score > best_score:
             best, best_score = intent, score
     return best, best_score
@@ -111,7 +165,15 @@ INTENT_PROMPT = """你是电商客服意图分类器。把用户问题归类为�
 
 
 async def classify_intent(question: str, llm: LLMClient | None = None) -> dict:
-    """返回 {"intent": str, "method": "rule"|"llm"|"fallback", "valid": bool}"""
+    """返回 {"intent": str, "method": "rule"|"llm"|"fallback", "valid": bool}
+
+    knowledge_only 模式下即使调用方传入 llm 也会被忽略：
+    意图识别必须完全由本地规则完成，这是纯知识库模式的定义之一。
+    """
+    if llm is not None and not settings.llm_enabled:
+        logger.info("knowledge_only 模式：忽略传入的模型客户端，仅使用本地规则")
+        llm = None
+
     question = (question or "").strip()
     if not question:
         return {"intent": DEFAULT_INTENT, "method": "fallback", "valid": True}
