@@ -58,3 +58,7 @@ htmlcov/
 .python-version
 backend/data/
 
+# 单端口部署的本地产物（由构建/复制生成，不进仓库；部署时随源码一起上传）
+backend/static/
+backend/knowledge_base/
+

@@ -8,11 +8,13 @@ from __future__ import annotations
 
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.routes import (
@@ -123,6 +125,48 @@ async def unhandled_handler(_req: Request, exc: Exception) -> JSONResponse:
     )
 
 
-@app.get("/", include_in_schema=False)
-def root() -> dict:
-    return {"name": settings.app_name, "docs": "/docs", "health": "/api/health"}
+# ---------------------------------------------------------------------------
+# 前后端单端口合并：挂载前端静态产物。
+# 优先 backend/static（部署时预置的 next build 产物），其次 frontend/out（本地开发）。
+# 只有存在 index.html 才挂载，纯后端开发（无产物）不受影响。
+# ---------------------------------------------------------------------------
+def _pick_static_dir() -> Path | None:
+    for candidate in (Path(settings.static_dir), Path(settings.frontend_out_dir)):
+        if candidate.exists() and (candidate / "index.html").exists():
+            return candidate
+    return None
+
+
+_STATIC_DIR = _pick_static_dir()
+if _STATIC_DIR is not None:
+    _PAGES = ("chat", "knowledge", "settings")
+
+    @app.get("/", include_in_schema=False)
+    async def index_page() -> FileResponse:
+        return FileResponse(str(_STATIC_DIR / "index.html"))
+
+    @app.get("/{page}", include_in_schema=False)
+    async def spa_page(page: str):
+        # 已知前端页面路径 → 返回对应静态 HTML（SPA 路由回退）。
+        if page in _PAGES:
+            candidate = _STATIC_DIR / page / "index.html"
+            if candidate.exists():
+                return FileResponse(str(candidate))
+        return JSONResponse(status_code=404, content={"detail": "页面不存在", "code": "http_404"})
+
+    # 静态资源（_next/*、icon.svg 等）挂到根；API 路由已在前注册，优先命中。
+    # redirect_slashes=False 关闭 /chat -> /chat/ 的 307，避免前端页面被重定向。
+    app.mount(
+        "/",
+        StaticFiles(directory=str(_STATIC_DIR), html=True),
+        name="frontend",
+    )
+    # StaticFiles 默认会对 /chat -> /chat/ 做 307，这里关掉它。
+    _static_app = app.routes[-1]
+    _static_app.app.redirect_slashes = False
+
+    logger.info("已挂载前端静态目录：%s", _STATIC_DIR)
+else:
+    @app.get("/", include_in_schema=False)
+    def root() -> dict:
+        return {"name": settings.app_name, "docs": "/docs", "health": "/api/health"}

@@ -284,7 +284,12 @@ def seed_from_directory(db: OrmSession, directory: str | None = None) -> dict:
 
     base = Path(directory or settings.knowledge_dir)
     if not base.exists():
-        return {"skipped": True, "reason": "样例目录不存在"}
+        # 回退到项目根的 knowledge_base（本地开发时的传统位置）
+        fallback = Path(settings.knowledge_dir_fallback)
+        if fallback.exists():
+            base = fallback
+        else:
+            return {"skipped": True, "reason": "样例目录不存在"}
 
     imported, failed = [], []
     for path in sorted(base.rglob("*")):

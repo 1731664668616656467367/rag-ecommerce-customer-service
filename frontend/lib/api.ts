@@ -21,8 +21,29 @@ import type {
   StatsResponse,
 } from "./types";
 
-const RAW_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000/api";
+// 同源相对路径：前后端合并为单端口部署时，直接走当前域名的 /api。
+// 只有在开发分离部署（前端 3000 / 后端 8000）时才需要显式配置绝对地址。
+const RAW_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "/api";
 export const API_BASE = RAW_BASE.replace(/\/$/, "");
+
+// 分享链接可能带 ?sharecode=xxx 鉴权参数。同源 API 用相对路径调用时
+// 不会自动带上它，导致被鉴权拦截（返回“链接不完整”）。这里从当前页面 URL
+// 读出来，附加到每个请求上，让分享链接里的前端也能正常调后端。
+function sharecodeParam(): string {
+  if (typeof window === "undefined") return "";
+  try {
+    const sc = new URLSearchParams(window.location.search).get("sharecode");
+    return sc ? `sharecode=${encodeURIComponent(sc)}` : "";
+  } catch {
+    return "";
+  }
+}
+
+function withSharecode(path: string): string {
+  const sc = sharecodeParam();
+  if (!sc) return path;
+  return path + (path.includes("?") ? "&" : "?") + sc;
+}
 
 export class ApiRequestError extends Error {
   status: number;
@@ -39,7 +60,7 @@ export class ApiRequestError extends Error {
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let res: Response;
   try {
-    res = await fetch(`${API_BASE}${path}`, {
+    res = await fetch(`${API_BASE}${withSharecode(path)}`, {
       ...init,
       headers: {
         ...(init?.body instanceof FormData ? {} : { "Content-Type": "application/json" }),

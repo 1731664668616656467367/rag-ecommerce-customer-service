@@ -75,9 +75,17 @@ class Settings(BaseSettings):
     # 纯知识库模式回答时最多引用几个片段、每段截取多少字
     knowledge_answer_max_chunks: int = 3
     knowledge_answer_snippet_chars: int = 300
-    knowledge_dir: str = str(PROJECT_DIR / "knowledge_base")
+    # 样例知识库目录。优先 backend/knowledge_base（部署时自包含），
+    # 其次项目根 knowledge_base（本地开发时的传统位置）。
+    knowledge_dir: str = str(BACKEND_DIR / "knowledge_base")
+    knowledge_dir_fallback: str = str(PROJECT_DIR / "knowledge_base")
     upload_dir: str = str(BACKEND_DIR / "data" / "uploads")
     index_dir: str = str(BACKEND_DIR / "data" / "index")
+    # 前端静态产物目录。部署单端口时把 next build 的产物放到 backend/static/，
+    # 后端会在启动时挂载它实现前后端合并；纯后端开发时该目录不存在，自动跳过。
+    # 优先级：backend/static（部署）> frontend/out（本地 next build 默认输出）。
+    static_dir: str = str(BACKEND_DIR / "static")
+    frontend_out_dir: str = str(PROJECT_DIR / "frontend" / "out")
 
     # ---------- 上传限制 ----------
     max_upload_mb: int = 10
